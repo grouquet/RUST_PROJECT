@@ -55,8 +55,8 @@ impl Game {
     }
 
     fn render (&self, out: &mut impl Write) -> io::Result<()>  {
-        // on efface et redessine tout, c'est ok pour petite grille
-        queue!(out, cursor::MoveTo(0, 0), Clear(ClearType::All))?;  
+
+        queue!(out, Clear(ClearType::All))?;  
 
         //Dessin --> boucles imbriquées 
         for y in 0..self.length {
@@ -86,24 +86,26 @@ fn main() -> io::Result<()> {
     let mut game = Game::new(20, 10); // grille 20x10
 
     //tick rate
-    let frame_duration = Duration::from_millis(16);
+    let frame_duration = Duration::from_millis(50);
     let mut last = Instant::now();
 
     //boucle principale
     'game_loop: loop {
-        //gestion des entrées
-        while event::poll(Duration::from_millis(0))? {
-            match event::read()? {
-                Event::Key(event) => {
-                    if event.code == KeyCode::Esc || event.code == KeyCode::Char('x') {
-                        break 'game_loop; // quitter le jeu
-                    }
-                    game.handle_input(event.code);
-                }
-                _ => {}
-            }
+        //temps restant avant la prochaine frame
+        let elapsed = last.elapsed();
+        let timeout = frame_duration.saturating_sub(elapsed);
 
+        //gestion des entrées
+        if event::poll(timeout)? {
+            if let Event::Key(event) = event::read()? {
+                if event.code == KeyCode::Esc || event.code == KeyCode::Char('x') {
+                    break 'game_loop; // quitter le jeu
+                }
+                game.handle_input(event.code);
+            }
         }
+
+        
 
         //update à chaque tick
         if last.elapsed() >= frame_duration {
