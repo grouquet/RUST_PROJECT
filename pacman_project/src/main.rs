@@ -28,6 +28,7 @@ struct Game {
     map: Vec<Vec<Thing>>, // la carte du jeu
     score : u32, // le score du joueur
     pellets_left: u32, // pastilles restantes -> pour gérer la victoire
+    wanted_dir: Position, // direction voulue par le joueur -> pour conserver la direction si on peut pas tourner
 }
 
 impl Game {
@@ -38,6 +39,7 @@ impl Game {
 
         let mut map = vec![vec![Thing::Empty; width as usize]; length as usize]; //initialisier grille vide
         let mut pacman_pos = Position { x: 0, y: 0 }; // initialiser position pacman
+        let mut wanted_dir = Position { x: 0, y: 0 }; // initialiser direction voulue
 
         let mut pellets_left: u32 = 0;
 
@@ -66,6 +68,7 @@ impl Game {
             map,
             score: 0,
             pellets_left,
+            wanted_dir,
         }
     }
 
@@ -85,30 +88,48 @@ impl Game {
 
     // Gère les entrées clavier pour changer la direction du Pacman
     fn handle_input(&mut self, code: KeyCode) {
-        self.pacman_dir = match code {
+        self.wanted_dir = match code {
             KeyCode::Up | KeyCode::Char('z') => Position { x: 0, y: -1 }, // haut
             KeyCode::Down | KeyCode::Char('s') => Position { x: 0, y: 1 }, // bas
             KeyCode::Left | KeyCode::Char('q') => Position { x: -1, y: 0 }, // gauche
             KeyCode::Right | KeyCode::Char('d') => Position { x: 1, y: 0 }, // droite
-            _ => self.pacman_dir,
+            _ => self.wanted_dir, // on ne reset pas !
         };
+    }
+
+    fn next_position(&self, from: Position, dir: Position) -> Position {
+        Position {
+            x: from.x + dir.x,
+            y: from.y + dir.y,
+        }
+    }
+
+    fn can_move(&self, from: Position, dir: Position) -> bool {
+        if dir.x == 0 && dir.y == 0 {
+            return false; // pas de mouvement
+        }
+        let next = self.next_position(from, dir);
+        self.in_bounds(next) && self.thing(next) != Thing::Wall
     }
 
     // Met à jour la position du Pacman en fonction de sa direction
     fn update(&mut self) {
-        let shift_x = self.pacman_pos.x + self.pacman_dir.x;
-        let shift_y = self.pacman_pos.y + self.pacman_dir.y;
 
-        let next = Position { x: shift_x, y: shift_y };
-
-        if !self.in_bounds(next) {
-            return; // ne bouge pas si hors limites ou mur
+        if self.pellets_left == 0 {
+            return; // ne bouge pas si victoire
         }
 
-        if self.thing(next) == Thing::Wall {
-            return; // ne bouge pas si mur
+        //si la direction voulue est possible, on la prend
+        if self.can_move(self.pacman_pos, self.wanted_dir) {
+            self.pacman_dir = self.wanted_dir; // met à jour la direction voulue
         }
 
+        //sinon on garde la direction actuelle
+        if !self.can_move(self.pacman_pos, self.pacman_dir) {
+            return; // ne bouge pas si la direction actuelle est bloquée
+        }
+
+        let next = self.next_position(self.pacman_pos, self.pacman_dir);
 
         self.pacman_pos = next; //déplacement du pacman
 
