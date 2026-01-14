@@ -27,6 +27,7 @@ struct Game {
     pacman_dir: Position, // direction du Pacman
     map: Vec<Vec<Thing>>, // la carte du jeu
     score : u32, // le score du joueur
+    pellets_left: u32, // pastilles restantes -> pour gérer la victoire
 }
 
 impl Game {
@@ -38,11 +39,16 @@ impl Game {
         let mut map = vec![vec![Thing::Empty; width as usize]; length as usize]; //initialisier grille vide
         let mut pacman_pos = Position { x: 0, y: 0 }; // initialiser position pacman
 
+        let mut pellets_left: u32 = 0;
+
         for (y, line) in ascii.iter().enumerate() {
             for (x, ch) in line.chars().enumerate() {
                 map[y][x] = match ch {
                     '#' => Thing::Wall,
-                    '.' => Thing::Pellet,
+                    '.' => {
+                        pellets_left += 1;
+                        Thing::Pellet
+                    },
                     'P' => {
                         pacman_pos = Position { x: x as i32, y: y as i32 };
                         Thing::Empty
@@ -59,6 +65,7 @@ impl Game {
             pacman_dir: Position { x: 0, y: 0 },
             map,
             score: 0,
+            pellets_left,
         }
     }
 
@@ -102,10 +109,12 @@ impl Game {
             return; // ne bouge pas si mur
         }
 
+
         self.pacman_pos = next; //déplacement du pacman
 
         if self.thing(next) == Thing::Pellet {
             self.score += 1; // incrémente le score
+            self.pellets_left -= 1; // décrémente les pastilles restantes
             self.set_thing(next, Thing::Empty); // enlève le pellet
         }
     }
@@ -114,8 +123,13 @@ impl Game {
 
         queue!(out, cursor::MoveTo(0, 0))?;  
 
-        queue!(out, Print(format!("Score: {}\r\n", self.score)))?;
+        queue!(out, Print(format!("Score: {}\r\n  |  Pellets left: {}\r\n", self.score, self.pellets_left)))?;
 
+        if self.pellets_left == 0 {
+            queue!(out, Print("You win! Press 'Esc' or 'x' to exit.\r\n"))?;
+        } else {
+            queue!(out, Print("\r\n"))?; // ligne vide entre le score et la grille
+        }
         //Dessin --> boucles imbriquées 
         for y in 0..self.length {
             for x in 0..self.width {
@@ -145,9 +159,9 @@ fn main() -> io::Result<()> {
         "####################",
         "#P.................#",
         "#.####.######.####.#",
-        "#......#....#......#",
+        "#..................#",
         "#.####.#.##.#.####.#",
-        "#......#....#......#",
+        "#..................#",
         "#.####.######.####.#",
         "#..................#",
         "####################",
