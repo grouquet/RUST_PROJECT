@@ -32,6 +32,7 @@ struct Game {
     ghost_pos: Position, // position du fantôme
     game_over: bool, // état de fin de jeu
     tick_count: u64, // compteur de ticks pour deplacer fantome (1tick sur 2)
+    ghost_dir: Position, // direction du fantôme, pour éviter le demi-tour, une fois qu'on met dist manhattan
 }
 
 impl Game {
@@ -80,6 +81,7 @@ impl Game {
             ghost_pos,
             game_over: false,
             tick_count: 0,
+            ghost_dir: Position { x: 0, y: 0 },
         }
     }
 
@@ -122,6 +124,14 @@ impl Game {
         let next = self.next_position(from, dir);
         self.in_bounds(next) && self.thing(next) != Thing::Wall
     }
+    
+    fn manhattan_distance(a: Position, b: Position) -> i32 {
+        (a.x - b.x).abs() + (a.y - b.y).abs()
+    }
+
+    fn opposite(dir: Position) -> Position {
+        Position { x: -dir.x, y: -dir.y }
+    }
 
     fn move_ghost(&mut self, tick: u64) {
         // Logique de déplacement du fantôme (à implémenter)
@@ -132,15 +142,49 @@ impl Game {
             Position { x: 1, y: 0 },
         ];
 
-        let start = (tick as usize) % 4;
-
-        for i in 0..4 {
-            let dir = dirs[(start + i) % 4];
-            if self.can_move(self.ghost_pos, dir) {
-                self.ghost_pos = self.next_position(self.ghost_pos, dir);
-                break;
+        let mut candidates: Vec<Position> = Vec::new();
+        for dir in dirs.iter() {
+            if self.can_move(self.ghost_pos, *dir) {
+                candidates.push(*dir);
             }
         }
+
+        if candidates.is_empty() {
+            return; // pas de mouvement possible
+        }
+
+        let opp = Self::opposite(self.ghost_dir);
+        let mut filtered: Vec<Position> = if self.ghost_dir.x == 0 && self.ghost_dir.y == 0 {
+            candidates.clone() // pas de direction précédente, on garde toutes les options
+        } else {
+            candidates
+                .iter()
+                .copied()
+                .filter(|&d| d != opp)
+                .collect()
+        };
+
+        if filtered.is_empty() {
+            filtered = candidates; // autoriser le demi-tour si nécessaire
+        }
+
+
+        let mut best_dir = filtered[0];
+        let mut best_distance = i32::MAX;
+
+        for dir in filtered {
+
+            let next = self.next_position(self.ghost_pos, dir);
+            let dist = Self::manhattan_distance(next, self.pacman_pos);
+
+            if dist < best_distance {
+                best_distance = dist;
+                best_dir = dir;
+            }
+
+        }
+        self.ghost_pos = self.next_position(self.ghost_pos, best_dir);
+        self.ghost_dir = best_dir;
     }
 
     // Met à jour la position du Pacman en fonction de sa direction
@@ -174,8 +218,7 @@ impl Game {
         
         if self.tick_count % 2 == 0 {
             self.move_ghost(tick); // déplace le fantôme tous les 2 ticks
-        }
-        self.move_ghost(tick);
+        };
 
         //collision
         if self.pacman_pos == self.ghost_pos {
@@ -229,18 +272,27 @@ impl Game {
 
 fn main() -> io::Result<()> {
 
-    // Map ASCII : # murs, . pastilles, P spawn
     const MAP: &[&str] = &[
-        "####################",
-        "#P.................#",
-        "#.####.######.####.#",
-        "#...............G..#",
-        "#.####.#.##.#.####.#",
-        "#..................#",
-        "#.####.######.####.#",
-        "#..................#",
-        "####################",
+        "########################################",
+        "#P..............##..............G......#",
+        "#.####.#####.###.##.###.#####.####.###.#",
+        "#......#...#................#...#......#",
+        "######.#.#.########.##.########.#.######",
+        "#......#.#....#.....##.....#....#......#",
+        "#.##########.#.###.####.###.#.########.#",
+        "#............#..............#..........#",
+        "#.##########.#####.##.#####.##########.#",
+        "#......#...........##...........#......#",
+        "######.#.#########.##.#########.#.######",
+        "#......#.....#........#.....#...#......#",
+        "#.##########.#.######.######.#.#########",
+        "#..........#.#..............#.#........#",
+        "#.########.#.#######.######.#.########.#",
+        "#......G...#.....##.....##..#..........#",
+        "########################################",
     ];
+
+
 
     //preparation du terminal
     terminal::enable_raw_mode()?; // pas de line buffering
