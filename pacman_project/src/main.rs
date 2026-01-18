@@ -29,6 +29,9 @@ struct Game {
     score : u32, // le score du joueur
     pellets_left: u32, // pastilles restantes -> pour gérer la victoire
     wanted_dir: Position, // direction voulue par le joueur -> pour conserver la direction si on peut pas tourner
+    ghost_pos: Position, // position du fantôme
+    game_over: bool, // état de fin de jeu
+    tick_count: u64, // compteur de ticks pour deplacer fantome (1tick sur 2)
 }
 
 impl Game {
@@ -40,6 +43,7 @@ impl Game {
         let mut map = vec![vec![Thing::Empty; width as usize]; length as usize]; //initialisier grille vide
         let mut pacman_pos = Position { x: 0, y: 0 }; // initialiser position pacman
         let mut wanted_dir = Position { x: 0, y: 0 }; // initialiser direction voulue
+        let mut ghost_pos = Position { x: 1, y: 1 }; // initialiser position fantôme
 
         let mut pellets_left: u32 = 0;
 
@@ -53,6 +57,10 @@ impl Game {
                     },
                     'P' => {
                         pacman_pos = Position { x: x as i32, y: y as i32 };
+                        Thing::Empty
+                    },
+                    'G' => {
+                        ghost_pos = Position { x: x as i32, y: y as i32 };
                         Thing::Empty
                     },
                     _ => Thing::Empty,
@@ -69,6 +77,9 @@ impl Game {
             score: 0,
             pellets_left,
             wanted_dir,
+            ghost_pos,
+            game_over: false,
+            tick_count: 0,
         }
     }
 
@@ -112,17 +123,38 @@ impl Game {
         self.in_bounds(next) && self.thing(next) != Thing::Wall
     }
 
+    fn move_ghost(&mut self, tick: u64) {
+        // Logique de déplacement du fantôme (à implémenter)
+        let dirs = [
+            Position { x: 0, y: -1 },
+            Position { x: 0, y: 1 },
+            Position { x: -1, y: 0 },
+            Position { x: 1, y: 0 },
+        ];
+
+        let start = (tick as usize) % 4;
+
+        for i in 0..4 {
+            let dir = dirs[(start + i) % 4];
+            if self.can_move(self.ghost_pos, dir) {
+                self.ghost_pos = self.next_position(self.ghost_pos, dir);
+                break;
+            }
+        }
+    }
+
     // Met à jour la position du Pacman en fonction de sa direction
     fn update(&mut self) {
 
-        if self.pellets_left == 0 {
-            return; // ne bouge pas si victoire
+        if self.game_over || self.pellets_left == 0 {
+            return; // ne fait rien si le jeu est terminé
         }
 
         //si la direction voulue est possible, on la prend
         if self.can_move(self.pacman_pos, self.wanted_dir) {
             self.pacman_dir = self.wanted_dir; // met à jour la direction voulue
         }
+
 
         //sinon on garde la direction actuelle
         if !self.can_move(self.pacman_pos, self.pacman_dir) {
@@ -132,10 +164,28 @@ impl Game {
         let next = self.next_position(self.pacman_pos, self.pacman_dir);
 
         self.pacman_pos = next; //déplacement du pacman
+        
+        let tick = (self.score as u64)
+            .wrapping_add(self.pacman_pos.x as u64)
+            .wrapping_add((self.pacman_pos.y as u64) << 8);
+
+
+        self.tick_count = self.tick_count.wrapping_add(1);
+        
+        if self.tick_count % 2 == 0 {
+            self.move_ghost(tick); // déplace le fantôme tous les 2 ticks
+        }
+        self.move_ghost(tick);
+
+        //collision
+        if self.pacman_pos == self.ghost_pos {
+            self.game_over = true; // fin du jeu
+            return;
+        }
 
         if self.thing(next) == Thing::Pellet {
             self.score += 1; // incrémente le score
-            self.pellets_left -= 1; // décrémente les pastilles restantes
+            self.pellets_left = self.pellets_left.saturating_sub(1); // décrémente les pastilles restantes
             self.set_thing(next, Thing::Empty); // enlève le pellet
         }
     }
@@ -146,7 +196,9 @@ impl Game {
 
         queue!(out, Print(format!("Score: {}\r\n  |  Pellets left: {}\r\n", self.score, self.pellets_left)))?;
 
-        if self.pellets_left == 0 {
+        if self.game_over {
+            queue!(out, Print("Game Over! Press 'Esc' or 'x' to exit.\r\n"))?;
+        } else if self.pellets_left == 0 {
             queue!(out, Print("You win! Press 'Esc' or 'x' to exit.\r\n"))?;
         } else {
             queue!(out, Print("\r\n"))?; // ligne vide entre le score et la grille
@@ -157,6 +209,8 @@ impl Game {
                 let pos = Position { x, y };
                 let pacman = if pos == self.pacman_pos {
                     "C" // dessine Pacman
+                } else if pos == self.ghost_pos {
+                    "G" // dessine le fantôme
                 } else {
                     match self.thing(pos) {
                         Thing::Wall => "#",    // dessine un mur
@@ -180,7 +234,7 @@ fn main() -> io::Result<()> {
         "####################",
         "#P.................#",
         "#.####.######.####.#",
-        "#..................#",
+        "#...............G..#",
         "#.####.#.##.#.####.#",
         "#..................#",
         "#.####.######.####.#",
@@ -211,6 +265,10 @@ fn main() -> io::Result<()> {
             if let Event::Key(event) = event::read()? {
                 if event.code == KeyCode::Esc || event.code == KeyCode::Char('x') {
                     break 'game_loop; // quitter le jeu
+                }
+                if event.code == KeyCode::Char('r') {
+                    game = Game::from_ascii(MAP); // redémarrer le jeu
+                    continue 'game_loop;
                 }
                 game.handle_input(event.code);
             }
