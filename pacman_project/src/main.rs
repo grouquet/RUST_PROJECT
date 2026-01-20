@@ -20,6 +20,13 @@ enum Thing {
     Pellet,
     Empty
 }
+
+#[derive(Clone, Copy)]
+struct Ghost {
+    pos: Position,
+    dir: Position,
+}
+
 struct Game {
     pacman_pos: Position, // position du Pacman
     width: i32, // largeur de la grille
@@ -29,10 +36,9 @@ struct Game {
     score : u32, // le score du joueur
     pellets_left: u32, // pastilles restantes -> pour gérer la victoire
     wanted_dir: Position, // direction voulue par le joueur -> pour conserver la direction si on peut pas tourner
-    ghost_pos: Position, // position du fantôme
     game_over: bool, // état de fin de jeu
     tick_count: u64, // compteur de ticks pour deplacer fantome (1tick sur 2)
-    ghost_dir: Position, // direction du fantôme, pour éviter le demi-tour, une fois qu'on met dist manhattan
+    ghosts : Vec<Ghost>, // liste des fantômes
 }
 
 impl Game {
@@ -44,7 +50,7 @@ impl Game {
         let mut map = vec![vec![Thing::Empty; width as usize]; length as usize]; //initialisier grille vide
         let mut pacman_pos = Position { x: 0, y: 0 }; // initialiser position pacman
         let mut wanted_dir = Position { x: 0, y: 0 }; // initialiser direction voulue
-        let mut ghost_pos = Position { x: 1, y: 1 }; // initialiser position fantôme
+        let mut ghosts: Vec<Ghost> = Vec::new(); // initialiser liste des fantômes
 
         let mut pellets_left: u32 = 0;
 
@@ -61,7 +67,10 @@ impl Game {
                         Thing::Empty
                     },
                     'G' => {
-                        ghost_pos = Position { x: x as i32, y: y as i32 };
+                        ghosts.push(Ghost {
+                            pos: Position { x: x as i32, y: y as i32 },
+                            dir: Position { x: 0, y: 0 },
+                        });
                         Thing::Empty
                     },
                     _ => Thing::Empty,
@@ -78,10 +87,9 @@ impl Game {
             score: 0,
             pellets_left,
             wanted_dir,
-            ghost_pos,
             game_over: false,
             tick_count: 0,
-            ghost_dir: Position { x: 0, y: 0 },
+            ghosts,
         }
     }
 
@@ -133,7 +141,14 @@ impl Game {
         Position { x: -dir.x, y: -dir.y }
     }
 
-    fn move_ghost(&mut self, tick: u64) {
+    fn move_ghost(&mut self) {
+        for g in &mut self.ghosts {
+            Game::move_one_ghost(g, self.pacman_pos, self.width, self.length, &self.map);
+        }
+    }
+
+
+    fn move_one_ghost(ghost: &mut Ghost, pacman_pos: Position, width: i32, length: i32, map: &Vec<Vec<Thing>>) {
         // Logique de déplacement du fantôme (à implémenter)
         let dirs = [
             Position { x: 0, y: -1 },
@@ -144,7 +159,11 @@ impl Game {
 
         let mut candidates: Vec<Position> = Vec::new();
         for dir in dirs.iter() {
-            if self.can_move(self.ghost_pos, *dir) {
+            let next = Position {
+                x: ghost.pos.x + dir.x,
+                y: ghost.pos.y + dir.y,
+            };
+            if next.x >= 0 && next.x < width && next.y >= 0 && next.y < length && map[next.y as usize][next.x as usize] != Thing::Wall {
                 candidates.push(*dir);
             }
         }
@@ -153,8 +172,8 @@ impl Game {
             return; // pas de mouvement possible
         }
 
-        let opp = Self::opposite(self.ghost_dir);
-        let mut filtered: Vec<Position> = if self.ghost_dir.x == 0 && self.ghost_dir.y == 0 {
+        let opp = Self::opposite(ghost.dir);
+        let mut filtered: Vec<Position> = if ghost.dir.x == 0 && ghost.dir.y == 0 {
             candidates.clone() // pas de direction précédente, on garde toutes les options
         } else {
             candidates
@@ -174,8 +193,11 @@ impl Game {
 
         for dir in filtered {
 
-            let next = self.next_position(self.ghost_pos, dir);
-            let dist = Self::manhattan_distance(next, self.pacman_pos);
+            let next = Position {
+                x: ghost.pos.x + dir.x,
+                y: ghost.pos.y + dir.y,
+            };
+            let dist = Self::manhattan_distance(next, pacman_pos);
 
             if dist < best_distance {
                 best_distance = dist;
@@ -183,8 +205,11 @@ impl Game {
             }
 
         }
-        self.ghost_pos = self.next_position(self.ghost_pos, best_dir);
-        self.ghost_dir = best_dir;
+        ghost.pos = Position {
+            x: ghost.pos.x + best_dir.x,
+            y: ghost.pos.y + best_dir.y,
+        };
+        ghost.dir = best_dir;
     }
 
     // Met à jour la position du Pacman en fonction de sa direction
@@ -199,16 +224,20 @@ impl Game {
             self.pacman_dir = self.wanted_dir; // met à jour la direction voulue
         }
 
-
+        let mut moved = false;
+        let mut next = self.pacman_pos;
         //sinon on garde la direction actuelle
-        if !self.can_move(self.pacman_pos, self.pacman_dir) {
-            return; // ne bouge pas si la direction actuelle est bloquée
+        if self.can_move(self.pacman_pos, self.pacman_dir) {
+            next = self.next_position(self.pacman_pos, self.pacman_dir);
+            self.pacman_pos = next; //déplacement du pacman
+            moved = true;
+        }
+        
+        if self.ghosts.iter().any(|g| g.pos == self.pacman_pos) {
+            self.game_over = true; // fin du jeu
+            return;
         }
 
-        let next = self.next_position(self.pacman_pos, self.pacman_dir);
-
-        self.pacman_pos = next; //déplacement du pacman
-        
         let tick = (self.score as u64)
             .wrapping_add(self.pacman_pos.x as u64)
             .wrapping_add((self.pacman_pos.y as u64) << 8);
@@ -217,16 +246,16 @@ impl Game {
         self.tick_count = self.tick_count.wrapping_add(1);
         
         if self.tick_count % 2 == 0 {
-            self.move_ghost(tick); // déplace le fantôme tous les 2 ticks
+            self.move_ghost(); // déplace le fantôme tous les 2 ticks
         };
 
         //collision
-        if self.pacman_pos == self.ghost_pos {
+        if self.ghosts.iter().any(|g| g.pos == self.pacman_pos) {
             self.game_over = true; // fin du jeu
             return;
         }
 
-        if self.thing(next) == Thing::Pellet {
+        if moved && self.thing(next) == Thing::Pellet {
             self.score += 1; // incrémente le score
             self.pellets_left = self.pellets_left.saturating_sub(1); // décrémente les pastilles restantes
             self.set_thing(next, Thing::Empty); // enlève le pellet
@@ -246,13 +275,14 @@ impl Game {
         } else {
             queue!(out, Print("\r\n"))?; // ligne vide entre le score et la grille
         }
+
         //Dessin --> boucles imbriquées 
         for y in 0..self.length {
             for x in 0..self.width {
                 let pos = Position { x, y };
                 let pacman = if pos == self.pacman_pos {
                     "C" // dessine Pacman
-                } else if pos == self.ghost_pos {
+                } else if self.ghosts.iter().any(|g| g.pos == pos) {
                     "G" // dessine le fantôme
                 } else {
                     match self.thing(pos) {
@@ -280,7 +310,7 @@ fn main() -> io::Result<()> {
         "######.#.#.########.##.########.#.######",
         "#......#.#....#.....##.....#....#......#",
         "#.##########.#.###.####.###.#.########.#",
-        "#............#..............#..........#",
+        "#............#........G.....#..........#",
         "#.##########.#####.##.#####.##########.#",
         "#......#...........##...........#......#",
         "######.#.#########.##.#########.#.######",
