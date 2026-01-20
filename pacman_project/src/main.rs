@@ -1,11 +1,11 @@
-use std::io::{self, Write};
+use std::io::{self, Write}; 
 use std::time::{Duration, Instant};
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode},
     execute, queue,
     style::Print,
-    terminal::{self, Clear, ClearType},
+    terminal::{self},
 };
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -49,7 +49,7 @@ impl Game {
 
         let mut map = vec![vec![Thing::Empty; width as usize]; length as usize]; //initialisier grille vide
         let mut pacman_pos = Position { x: 0, y: 0 }; // initialiser position pacman
-        let mut wanted_dir = Position { x: 0, y: 0 }; // initialiser direction voulue
+        let wanted_dir = Position { x: 0, y: 0 }; // initialiser direction voulue
         let mut ghosts: Vec<Ghost> = Vec::new(); // initialiser liste des fantômes
 
         let mut pellets_left: u32 = 0;
@@ -107,7 +107,7 @@ impl Game {
         self.map[pos.y as usize][pos.x as usize] = thing;
     }
 
-    // Gère les entrées clavier pour changer la direction du Pacman
+    // Gère les entrées clavier pour changer la direction du Pacman, la wanted_dir
     fn handle_input(&mut self, code: KeyCode) {
         self.wanted_dir = match code {
             KeyCode::Up | KeyCode::Char('z') => Position { x: 0, y: -1 }, // haut
@@ -149,7 +149,7 @@ impl Game {
 
 
     fn move_one_ghost(ghost: &mut Ghost, pacman_pos: Position, width: i32, length: i32, map: &Vec<Vec<Thing>>) {
-        // Logique de déplacement du fantôme (à implémenter)
+        // Logique de déplacement du fantôme
         let dirs = [
             Position { x: 0, y: -1 },
             Position { x: 0, y: 1 },
@@ -157,7 +157,7 @@ impl Game {
             Position { x: 1, y: 0 },
         ];
 
-        let mut candidates: Vec<Position> = Vec::new();
+        let mut candidates: Vec<Position> = Vec::new(); // directions possibles
         for dir in dirs.iter() {
             let next = Position {
                 x: ghost.pos.x + dir.x,
@@ -172,6 +172,7 @@ impl Game {
             return; // pas de mouvement possible
         }
 
+        //ce bloc filtre les directions pour éviter les demi-tours répétitifs
         let opp = Self::opposite(ghost.dir);
         let mut filtered: Vec<Position> = if ghost.dir.x == 0 && ghost.dir.y == 0 {
             candidates.clone() // pas de direction précédente, on garde toutes les options
@@ -179,7 +180,7 @@ impl Game {
             candidates
                 .iter()
                 .copied()
-                .filter(|&d| d != opp)
+                .filter(|&d| d != opp) //on enlève la direction opposée
                 .collect()
         };
 
@@ -191,6 +192,7 @@ impl Game {
         let mut best_dir = filtered[0];
         let mut best_distance = i32::MAX;
 
+        //on choisit la direction qui rapproche le plus du pacman
         for dir in filtered {
 
             let next = Position {
@@ -209,7 +211,7 @@ impl Game {
             x: ghost.pos.x + best_dir.x,
             y: ghost.pos.y + best_dir.y,
         };
-        ghost.dir = best_dir;
+        ghost.dir = best_dir;//on garde en mémoire la direction pour après (éviter les demi-tours cf l.176)
     }
 
     // Met à jour la position du Pacman en fonction de sa direction
@@ -219,6 +221,8 @@ impl Game {
             return; // ne fait rien si le jeu est terminé
         }
 
+        let prev_pos = self.pacman_pos; //permet de gérer si pac et un ghost se croise au même tick
+
         //si la direction voulue est possible, on la prend
         if self.can_move(self.pacman_pos, self.wanted_dir) {
             self.pacman_dir = self.wanted_dir; // met à jour la direction voulue
@@ -226,34 +230,31 @@ impl Game {
 
         let mut moved = false;
         let mut next = self.pacman_pos;
-        //sinon on garde la direction actuelle
+        //on choisit la direction actuelle qui a pu être mi sà jour juste au dessus
         if self.can_move(self.pacman_pos, self.pacman_dir) {
             next = self.next_position(self.pacman_pos, self.pacman_dir);
             self.pacman_pos = next; //déplacement du pacman
             moved = true;
         }
         
+        //si fantome rencontre pacman
         if self.ghosts.iter().any(|g| g.pos == self.pacman_pos) {
             self.game_over = true; // fin du jeu
             return;
         }
-
-        let tick = (self.score as u64)
-            .wrapping_add(self.pacman_pos.x as u64)
-            .wrapping_add((self.pacman_pos.y as u64) << 8);
-
 
         self.tick_count = self.tick_count.wrapping_add(1);
         
         if self.tick_count % 2 == 0 {
-            self.move_ghost(); // déplace le fantôme tous les 2 ticks
+            let prev_ghost: Vec<Position> = self.ghosts.iter().map(|g| g.pos).collect();
+            self.move_ghost(); // déplace le fantôme tous les 2 ticks comme ça ils sont plus lents
+            if self.ghosts.iter().enumerate().any(|(i, g)| {
+                g.pos == self.pacman_pos || (prev_ghost[i] == self.pacman_pos && g.pos == prev_pos)}) 
+                { 
+                self.game_over = true; // fin du jeu
+                return;
+            }
         };
-
-        //collision
-        if self.ghosts.iter().any(|g| g.pos == self.pacman_pos) {
-            self.game_over = true; // fin du jeu
-            return;
-        }
 
         if moved && self.thing(next) == Thing::Pellet {
             self.score += 1; // incrémente le score
@@ -304,7 +305,7 @@ fn main() -> io::Result<()> {
 
     const MAP: &[&str] = &[
         "########################################",
-        "#P..............##..............G......#",
+        "#P..............##.....................#",
         "#.####.#####.###.##.###.#####.####.###.#",
         "#......#...#................#...#......#",
         "######.#.#.########.##.########.#.######",
@@ -327,7 +328,7 @@ fn main() -> io::Result<()> {
     //preparation du terminal
     terminal::enable_raw_mode()?; // pas de line buffering
     let mut stdout = io::stdout();
-    execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
+    execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?; //other screen buffer
 
     //jeu
     let mut game = Game::from_ascii(MAP); // jeu à partir de MAP
@@ -350,6 +351,9 @@ fn main() -> io::Result<()> {
                 }
                 if event.code == KeyCode::Char('r') {
                     game = Game::from_ascii(MAP); // redémarrer le jeu
+                    execute!(stdout, terminal::Clear(terminal::ClearType::All), cursor::MoveTo(0, 0))?;
+                    game.render(&mut stdout)?; // enlève l'ancien GameOver
+                    last = Instant::now();
                     continue 'game_loop;
                 }
                 game.handle_input(event.code);
